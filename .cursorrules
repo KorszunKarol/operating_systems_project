@@ -1,0 +1,53 @@
+Phase 1 Considerations:
+• Once the execution of ALL processes is finished, all types of significant dynamic
+memory, if any, must be released.
+• Users' names cannot contain '&'. If they contain them, they must be removed. This
+is due to the system's communication protocol, which is in the Annex. This will be
+case sensitive.
+• Own commands are case insensitive.
+• We can consider that the format of the configuration file is correct.
+• You cannot use the printf, scanf, gets, puts, etc. functions. You can only interact with
+the screen and files with the read and write functions. It is allowed to use the sprintf
+function and the like.
+• The system, popen or any variant functions cannot be used.
+• The stability of the application and its correct functioning must be guaranteed.
+Under no circumstances can an infinite loop, core dumpeds, active waits, warnings
+when compiling, etc. occur. It is also necessary to control all those aspects that may
+cause an error and, if they occur, duly inform the user and, if possible, continue with
+the normal operation of the application.
+• From now until the end of the practice, it must be considered that the Fleck process
+can finish its execution by using the appropriate command or by pressing CTRL+C.
+• It is mandatory to use a makefile to generate the executable.
+• It is not enough that the file you deliver has a .tar extension, but it must be able to
+be unpacked with the tar command. Any practice or checkpoint that cannot be
+"decompressed" in this way will not be corrected.
+• Remember that the code must be properly modulated, that is: you cannot place
+everything in a single .c file, and it is mandatory that there is a makefile. Note that if
+when trying to correct a practice it does not compile with the make command (for
+whatever reason), the submission will be qualified as unsuitable (2).
+• Along with the code, an explanation of how the phase has been designed and
+structured must be provided. It is highly recommended that, before starting to
+program, you carry out this analysis and validate it with the interns of the subject.
+See Appendix IV for more details. The report must include in a clear and
+understandable manner:
+o Diagrams explaining processes have been created.
+o Data structures used and their justification
+
+
+
+
+
+
+
+
+It is requested:
+• That you design and program Fleck.c (name of the program that customers will use).
+• That you program Gotham.c, Enigma.c and Harley.c.
+• Fleck first processes the configuration file and saves its information in a suitable
+structure.
+• Fleck will have to recognize the own commands described above. It will only be
+necessary to implement the list media / text commands. For the others, show a
+message of "Command OK" when it is detected correctly, and "Unknown command"
+when there is an error.
+• Gotham, Enigma and Harley will have to process the configuration file and save their
+information in a suitable structure.
