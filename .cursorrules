@@ -51,3 +51,112 @@ message of "Command OK" when it is detected correctly, and "Unknown command"
 when there is an error.
 • Gotham, Enigma and Harley will have to process the configuration file and save their
 information in a suitable structure.
+
+
+
+
+
+
+
+
+Phase 1: Just warming up
+In Phase 1, the design and programming of the four processes of the system will begin.
+In all of them, first it will be necessary to process the configuration file, the name of
+which is received by parameter.
+In addition, the Fleck process will work in command-line mode and will have a reduced
+set of functions programmed (See Table 1).
+Configuration file - Fleck
+This text file will have several fields:
+• Name of the user who runs.
+• Name of the folder where the user's files are located.
+• The IP and port (each on a line ending with a '\n') from where the Gotham server
+is located.
+Example configuration text file in Figure 3:
+Arthur
+/Arthur
+192.168.50.51
+8011
+Figure 3. Configuration file of a Fleck process.
+Configuration File - Gotham
+This text file will have several fields:
+• The IP and port (each on a line ending with a '\n') from where the server will
+open to communicate with Fleck.
+• The IP and port (each on a line ending with a '\n') from where the server will
+open to communicate with Harley/Enigma.
+Example configuration text file in Figure 4:
+192.168.50.51
+8011
+192.168.50.51
+8015
+Figure 4. Configuration file of a Gotham process
+
+Configuration file – Enigma / Harley
+This text file will have several fields:
+• The IP and port (each on a line ending with a '\n') where the Gotham server is
+located.
+• The IP and port (each on a line ending with a '\n') from where the server will
+open to communicate with Fleck.
+• The name of the folder where the files received must be saved and in which that
+worker must always operate. It must be different for each worker.
+• Type of worker. This can be either Media or Text. Any other type will be
+considered an error.
+Example configuration text file in Figure 5:
+192.168.50.51
+8015
+192.168.50.51
+8016
+/riddler
+Media
+Figure 5. Configuration file of an Enigma / Harley process.
+Next, it will be necessary to design and implement all the program logic that interprets
+all the commands which allow Fleck to work. These commands are case insensitive.
+COMMAND DESCRIPTION
+CONNECT Connects the user to the system. It will first connect to the
+main system, Gotham. It will not connect to the respective
+worker (Enigma/Harley) until it makes a distortion request.
+LOGOUT Disconnect the user from the system.
+LIST MEDIA List all available media within the user's directory.
+LIST TEXT Lists all available text files within the user's directory.
+DISTORT <file.xxx> <f> Request to distort a file.
+The first parameter will be the name of the file. Depending
+on the file extension, it will be a text or media file.
+The second parameter will be the distortion factor.
+Depending on the file extension, it will have different effects.
+CHECK STATUS See the status of ongoing distortions, in the form of progress
+bars.
+CLEAR ALL Clears the already finished distortions from the progress list.
+Table 1. List of extended commands.
+
+
+$montserrat:> Fleck config.dat
+Arthur user initialized
+$ DISTORTED laugh.wav 2
+Cannot distort, you are not connected to Mr. J System
+$ CONNECT PLEASE
+Unknown command
+$ CONNECT
+Arthur connected to Mr. J System. Let the chaos begin!:)
+$ CHECK sTaTuS
+You have no ongoing or finished distortions
+$ LIST MEDIA
+There are 6 media files available:
+1. laugh.wav
+2. card.png
+3. song.wav
+4. gotham.jpg
+$ DISTORTED song.wav 23
+Distortion started!
+$ something else
+ERROR: Please input a valid command.
+$ TEXT LIST
+There are 2 text files available:
+1. the_family.txt
+2. psyc.txt
+$ DISTORTED death_of_the_family.txt 5
+Distortion started!
+$ CHECK STATUS
+song.wav 96% |====================% |
+the_family.txt 61% |============ |
+$ LOGOUT
+Thanks for using Mr. J System, see you soon, chaos lover :)
+$montserrat:>
