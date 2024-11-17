@@ -29,7 +29,7 @@ char *read_until(int fd, char end) {
     }
 
     if (buffer) {
-        buffer[i] = '\0';  // Null-terminate the string
+        buffer[i] = '\0';
     }
     return buffer;
 }

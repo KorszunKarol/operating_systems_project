@@ -14,11 +14,9 @@
 
 #define printF(x) write(1, x, strlen(x))
 
-// Common error messages
 #define ERROR_MSG_CONFIG "Error opening config file\n"
 #define ERROR_MSG_DIR "Error: Directory does not exist\n"
 
-// Common functions
 void nothing(int signum);
 
 #endif

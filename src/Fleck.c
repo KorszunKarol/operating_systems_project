@@ -2,16 +2,13 @@
 #include "config.h"
 #include "utils.h"
 
-// Error messages specific to Fleck
 #define ERROR_MSG_COMMAND "ERROR: Please input a valid command.\n"
 #define ERROR_MSG_NOT_CONNECTED "Cannot distort, you are not connected to Mr. J System\n"
 #define ERROR_MSG_DISTORT_USAGE "Usage: DISTORTED <file.xxx> <factor>\n"
 
-// Global variables
 static FleckConfig config;
 static int is_connected = 0;
 
-// Forward declarations
 void handle_connect(void);
 void handle_logout(void);
 void list_files(const char *type);
@@ -22,30 +19,24 @@ int main(int argc, char *argv[]) {
         printF("Usage: Fleck <config_file>\n");
         return 1;
     }
-
-    // Set up signal handler
     signal(SIGINT, nothing);
 
-    // Load configuration
     load_fleck_config(argv[1], &config);
 
-    // Verify directory
     verify_directory(config.folder_path);
 
-    // Initialization message
     char *message;
     asprintf(&message, "%s user initialized\n", config.username);
     printF(message);
     free(message);
 
-    // Command loop
     char command[MAX_COMMAND_LENGTH];
     while (1) {
         printF("$ ");
         int bytes_read = read(STDIN_FILENO, command, MAX_COMMAND_LENGTH - 1);
         if (bytes_read <= 0) break;
 
-        command[bytes_read - 1] = '\0'; // Remove newline
+        command[bytes_read - 1] = '\0';
         handle_command(command);
     }
 
@@ -64,7 +55,7 @@ void handle_connect(void) {
 void handle_logout(void) {
     is_connected = 0;
     printF("Thanks for using Mr. J System, see you soon, chaos lover :)\n");
-    exit(0);  // Exit the program after logging out
+    exit(0);
 }
 
 void handle_command(char *command) {
@@ -82,8 +73,8 @@ void handle_command(char *command) {
         handle_logout();
     } else if (strcmp(token, "LIST") == 0) {
         token = strtok(NULL, " \n");
-        if (token) {
-            list_files(token);
+        if (token && strcmp(token, "MEDIA") == 0) {
+            list_files("MEDIA");
         } else {
             printF(ERROR_MSG_COMMAND);
         }
@@ -105,16 +96,16 @@ void handle_command(char *command) {
             printF(ERROR_MSG_DISTORT_USAGE);
             return;
         }
-        printF("Distortion started!\n");
+        printF("Command OK\n");
     } else if (strcmp(token, "CHECK") == 0) {
         token = strtok(NULL, " \n");
         if (token && strcmp(token, "STATUS") == 0) {
-            printF("You have no ongoing or finished distortions\n");
+            printF("Command OK\n");
         } else {
             printF(ERROR_MSG_COMMAND);
         }
     } else {
-        printF(ERROR_MSG_COMMAND);
+        printF("Unknown command\n");
     }
 }
 

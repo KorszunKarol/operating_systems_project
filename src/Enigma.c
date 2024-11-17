@@ -2,11 +2,9 @@
 #include "config.h"
 #include "utils.h"
 
-// Error messages specific to Enigma
 #define ERROR_MSG_TYPE_ENIGMA "Error: Invalid worker type. Must be 'Text' or 'Media'\n"
 #define ERROR_MSG_USAGE_ENIGMA "Usage: Enigma <config_file>\n"
 
-// Global configuration
 static WorkerConfig config;
 
 int main(int argc, char *argv[]) {
@@ -15,16 +13,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Set up signal handler
     signal(SIGINT, nothing);
 
-    // Load configuration
     load_worker_config(argv[1], &config);
 
-    // Verify directory
     verify_directory(config.save_folder);
 
-    // Validate worker type
     if (strcmp(config.worker_type, "Text") != 0 && strcmp(config.worker_type, "Media") != 0) {
         printF(ERROR_MSG_TYPE_ENIGMA);
         return 1;

@@ -8,7 +8,6 @@
 #define MAX_TYPE_LENGTH 16
 #define MAX_COMMAND_LENGTH 256
 
-// Configuration structures for each process
 typedef struct {
     char username[MAX_USERNAME_LENGTH];
     char folder_path[MAX_PATH_LENGTH];
