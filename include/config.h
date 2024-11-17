@@ -1,5 +1,13 @@
-#ifndef CONFIG_H
-#define CONFIG_H
+/*********************************
+*
+* @File: config.h
+* @Purpose: Configuration structures and loading functions
+* @Author: [Your Name]
+*
+*********************************/
+
+#ifndef __CONFIG_H__
+#define __CONFIG_H__
 
 #define MAX_IP_LENGTH 16
 #define MAX_PORT_LENGTH 6
@@ -9,26 +17,34 @@
 #define MAX_COMMAND_LENGTH 256
 
 typedef struct {
-    char username[MAX_USERNAME_LENGTH];
-    char folder_path[MAX_PATH_LENGTH];
-    char gotham_ip[MAX_IP_LENGTH];
-    char gotham_port[MAX_PORT_LENGTH];
+    char sUsername[MAX_USERNAME_LENGTH];
+    char sFolderPath[MAX_PATH_LENGTH];
+    char sGothamIP[MAX_IP_LENGTH];
+    char sGothamPort[MAX_PORT_LENGTH];
 } FleckConfig;
 
 typedef struct {
-    char fleck_ip[MAX_IP_LENGTH];
-    char fleck_port[MAX_PORT_LENGTH];
-    char worker_ip[MAX_IP_LENGTH];
-    char worker_port[MAX_PORT_LENGTH];
+    char sFleckIP[MAX_IP_LENGTH];
+    char sFleckPort[MAX_PORT_LENGTH];
+    char sWorkerIP[MAX_IP_LENGTH];
+    char sWorkerPort[MAX_PORT_LENGTH];
 } GothamConfig;
 
 typedef struct {
-    char gotham_ip[MAX_IP_LENGTH];
-    char gotham_port[MAX_PORT_LENGTH];
-    char fleck_ip[MAX_IP_LENGTH];
-    char fleck_port[MAX_PORT_LENGTH];
-    char save_folder[MAX_PATH_LENGTH];
-    char worker_type[MAX_TYPE_LENGTH];
+    char sGothamIP[MAX_IP_LENGTH];
+    char sGothamPort[MAX_PORT_LENGTH];
+    char sFleckIP[MAX_IP_LENGTH];
+    char sFleckPort[MAX_PORT_LENGTH];
+    char sSaveFolder[MAX_PATH_LENGTH];
+    char sWorkerType[MAX_TYPE_LENGTH];
 } WorkerConfig;
+
+void load_fleck_config(const char *psFilename, FleckConfig *psConfig);
+void load_gotham_config(const char *psFilename, GothamConfig *psConfig);
+void load_worker_config(const char *psFilename, WorkerConfig *psConfig);
+
+int validate_fleck_config(const FleckConfig *psConfig);
+int validate_gotham_config(const GothamConfig *psConfig);
+int validate_worker_config(const WorkerConfig *psConfig);
 
 #endif

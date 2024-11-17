@@ -1,68 +1,69 @@
 #include "utils.h"
+#include "shared.h"
+
+/*************************************************
+*
+* @Name: readUntil
+* @Def: Reads characters from a file descriptor until a specified end character is encountered.
+* @Arg: In: fd = file descriptor to read from
+*       In: end = character to stop reading at
+* @Ret: Returns a dynamically allocated string containing the read characters, or NULL on failure.
+*
+*************************************************/
 
 char *read_until(int fd, char end) {
-    int i = 0;
-    ssize_t chars_read;
+    int nIndex = 0;
+    ssize_t nCharsRead;
     char c = 0;
-    char *buffer = NULL;
+    char *psBuffer = NULL;
 
     while (1) {
-        chars_read = read(fd, &c, sizeof(char));
-        if (chars_read == 0) {
-            if (i == 0) {
+        nCharsRead = read(fd, &c, sizeof(char));
+        if (nCharsRead == 0) {
+            if (nIndex == 0) {
                 return NULL;
             }
             break;
-        } else if (chars_read < 0) {
-            free(buffer);
+        } else if (nCharsRead < 0) {
+            free(psBuffer);
             return NULL;
         }
 
         if (c == end) {
             break;
         }
-        buffer = (char *)realloc(buffer, i + 2);
-        if (!buffer) {
+        psBuffer = (char *)realloc(psBuffer, nIndex + 2);
+        if (!psBuffer) {
             return NULL;
         }
-        buffer[i++] = c;
+        psBuffer[nIndex++] = c;
     }
 
-    if (buffer) {
-        buffer[i] = '\0';
+    if (psBuffer) {
+        psBuffer[nIndex] = '\0';
     }
-    return buffer;
+    return psBuffer;
 }
+
+/*************************************************
+*
+* @Name: verifyDirectory
+* @Def: Verifies if a directory exists at the given path.
+* @Arg: In: path = path of the directory to verify
+* @Ret: None
+*
+*************************************************/
 
 void verify_directory(const char *path) {
-    DIR *dir = opendir(path);
-    if (!dir) {
-        char *error;
-        asprintf(&error, "Error: Directory %s does not exist\n", path);
-        printF(error);
-        free(error);
+    DIR *pDir = opendir(path);
+    if (!pDir) {
+        char *psError;
+        asprintf(&psError, "Error: Directory %s does not exist\n", path);
+        vWriteLog(psError);
+        free(psError);
         exit(1);
     }
-    closedir(dir);
-}
-
-void to_uppercase(char *str) {
-    for (int i = 0; str[i]; i++) {
-        str[i] = toupper((unsigned char)str[i]);
-    }
-}
-
-void sanitize_username(char *username) {
-    char *src = username;
-    char *dst = username;
-    while (*src) {
-        if (*src != '&') {
-            *dst = *src;
-            dst++;
-        }
-        src++;
-    }
-    *dst = '\0';
+    closedir(pDir);
 }
 
 void setup_signal_handlers(void) {
@@ -72,7 +73,7 @@ void setup_signal_handlers(void) {
 void load_fleck_config(const char *filename, FleckConfig *config) {
     int fd = open(filename, O_RDONLY);
     if (fd == -1) {
-        printF(ERROR_MSG_CONFIG);
+        vWriteLog(ERROR_MSG_CONFIG);
         exit(1);
     }
 
@@ -80,26 +81,26 @@ void load_fleck_config(const char *filename, FleckConfig *config) {
 
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->username, line, MAX_USERNAME_LENGTH - 1);
-        sanitize_username(config->username);
+        strncpy(config->sUsername, line, MAX_USERNAME_LENGTH - 1);
+        sanitize_username(config->sUsername);
         free(line);
     }
 
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->folder_path, line, MAX_PATH_LENGTH - 1);
+        strncpy(config->sFolderPath, line, MAX_PATH_LENGTH - 1);
         free(line);
     }
 
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->gotham_ip, line, MAX_IP_LENGTH - 1);
+        strncpy(config->sGothamIP, line, MAX_IP_LENGTH - 1);
         free(line);
     }
 
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->gotham_port, line, MAX_PORT_LENGTH - 1);
+        strncpy(config->sGothamPort, line, MAX_PORT_LENGTH - 1);
         free(line);
     }
 
@@ -120,39 +121,51 @@ void load_worker_config(const char *filename, WorkerConfig *config) {
 
     char *line;
 
+    // Read Gotham IP
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->gotham_ip, line, MAX_IP_LENGTH - 1);
+        strncpy(config->sGothamIP, line, MAX_IP_LENGTH - 1);
+        config->sGothamIP[MAX_IP_LENGTH - 1] = '\0';
         free(line);
     }
 
+    // Read Gotham Port
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->gotham_port, line, MAX_PORT_LENGTH - 1);
+        strncpy(config->sGothamPort, line, MAX_PORT_LENGTH - 1);
+        config->sGothamPort[MAX_PORT_LENGTH - 1] = '\0';
         free(line);
     }
 
+    // Read Fleck IP
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->fleck_ip, line, MAX_IP_LENGTH - 1);
+        strncpy(config->sFleckIP, line, MAX_IP_LENGTH - 1);
+        config->sFleckIP[MAX_IP_LENGTH - 1] = '\0';
         free(line);
     }
 
+    // Read Fleck Port
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->fleck_port, line, MAX_PORT_LENGTH - 1);
+        strncpy(config->sFleckPort, line, MAX_PORT_LENGTH - 1);
+        config->sFleckPort[MAX_PORT_LENGTH - 1] = '\0';
         free(line);
     }
 
+    // Read Save Folder
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->save_folder, line, MAX_PATH_LENGTH - 1);
+        strncpy(config->sSaveFolder, line, MAX_PATH_LENGTH - 1);
+        config->sSaveFolder[MAX_PATH_LENGTH - 1] = '\0';
         free(line);
     }
 
+    // Read Worker Type
     line = read_until(fd, '\n');
     if (line) {
-        strncpy(config->worker_type, line, MAX_TYPE_LENGTH - 1);
+        strncpy(config->sWorkerType, line, MAX_TYPE_LENGTH - 1);
+        config->sWorkerType[MAX_TYPE_LENGTH - 1] = '\0';
         free(line);
     }
 

@@ -9,14 +9,15 @@ BIN_DIR = bin
 
 $(shell mkdir -p $(BIN_DIR) $(OBJ_DIR))
 
-SRCS = $(wildcard $(SRC_DIR)/*.c)
-OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
-DEPS = $(OBJS:.o=.d)
+# Add shared.o to common objects
+COMMON_OBJS = $(OBJ_DIR)/utils.o $(OBJ_DIR)/network.o $(OBJ_DIR)/config.o \
+              $(OBJ_DIR)/string_utils.o $(OBJ_DIR)/shared.o
+
 EXECUTABLES = Fleck Gotham Enigma Harley
 
 all: $(EXECUTABLES)
 
-$(EXECUTABLES): %: $(OBJ_DIR)/%.o $(OBJ_DIR)/utils.o
+$(EXECUTABLES): %: $(OBJ_DIR)/%.o $(COMMON_OBJS)
 	$(CC) $^ $(LDFLAGS) -o $(BIN_DIR)/$@
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
@@ -32,5 +33,5 @@ tar: clean
 	cp -r src include config Makefile README.md run_project.sh project/
 	tar -czf project.tar.gz project
 	rm -rf project
-	
+
 .PHONY: all clean tar

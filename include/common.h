@@ -1,5 +1,14 @@
-#ifndef COMMON_H
-#define COMMON_H
+/*********************************
+*
+* @File: common.h
+* @Purpose: Common definitions and utility functions
+* @Author: [Your Name]
+* @Date: [YYYY-MM-DD]
+*
+*********************************/
+
+#ifndef __COMMON_H__
+#define __COMMON_H__
 
 #include <stdio.h>
 #include <stdlib.h>

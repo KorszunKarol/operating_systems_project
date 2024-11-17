@@ -1,4 +1,4 @@
-Karol
+testuser
 files/test
-192.168.1.100
-8011
+127.0.0.1
+9660
