@@ -9,15 +9,23 @@ BIN_DIR = bin
 
 $(shell mkdir -p $(BIN_DIR) $(OBJ_DIR))
 
-# Add shared.o to common objects
+# Common objects for all executables
 COMMON_OBJS = $(OBJ_DIR)/utils.o $(OBJ_DIR)/network.o $(OBJ_DIR)/config.o \
               $(OBJ_DIR)/string_utils.o $(OBJ_DIR)/shared.o
+
+# Worker objects (needed by Enigma and Harley)
+WORKER_OBJS = $(COMMON_OBJS) $(OBJ_DIR)/worker.o
 
 EXECUTABLES = Fleck Gotham Enigma Harley
 
 all: $(EXECUTABLES)
 
-$(EXECUTABLES): %: $(OBJ_DIR)/%.o $(COMMON_OBJS)
+# Special rules for worker-based executables
+Enigma Harley: %: $(OBJ_DIR)/%.o $(WORKER_OBJS)
+	$(CC) $^ $(LDFLAGS) -o $(BIN_DIR)/$@
+
+# Rule for non-worker executables
+Fleck Gotham: %: $(OBJ_DIR)/%.o $(COMMON_OBJS)
 	$(CC) $^ $(LDFLAGS) -o $(BIN_DIR)/$@
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
@@ -28,10 +36,4 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 clean:
 	rm -rf $(BIN_DIR) $(OBJ_DIR) project.tar.gz project/
 
-tar: clean
-	mkdir -p project/files/test project/files/enigma project/files/harley
-	cp -r src include config Makefile README.md run_project.sh project/
-	tar -czf project.tar.gz project
-	rm -rf project
-
-.PHONY: all clean tar
+.PHONY: all clean

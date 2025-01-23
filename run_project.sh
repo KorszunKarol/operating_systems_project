@@ -1,33 +1,22 @@
 #!/bin/bash
 
-# Create necessary directories with proper permissions
+# Create directories
 mkdir -p files/test files/enigma files/harley
-chmod 755 files/test files/enigma files/harley
 
-# Create test files
-echo "Example text content" > files/test/test1.txt
-echo "Another text file" > files/test/test2.txt
-touch files/test/media1.wav files/test/media2.jpg files/test/media3.png
-touch files/test/sample.jpg files/test/audio.wav
-chmod 644 files/test/*
+# Create test files if they don't exist
+echo "Test file" > files/test/test.txt
+touch files/test/media1.jpg
+touch files/test/media1.wav
 
-# Kill any existing processes
-pkill -f "bin/Gotham"
-pkill -f "bin/Enigma"
-pkill -f "bin/Harley"
-pkill -f "bin/Fleck"
-
+# Build project
 make clean
 make
 
-# Start processes in order
-./bin/Gotham config/gotham_config.txt &
-sleep 2
-
-./bin/Enigma config/enigma_config.txt &
+# Run processes in separate terminals
+gnome-terminal -- bash -c "./bin/Gotham config/gotham_config.txt; exec bash"
 sleep 1
-
-./bin/Harley config/harley_config.txt &
+gnome-terminal -- bash -c "./bin/Enigma config/enigma_config.txt; exec bash"
 sleep 1
-
-./bin/Fleck config/fleck_config.txt
+gnome-terminal -- bash -c "./bin/Harley config/harley_config.txt; exec bash"
+sleep 1
+gnome-terminal -- bash -c "./bin/Fleck config/fleck_config.txt; exec bash"
