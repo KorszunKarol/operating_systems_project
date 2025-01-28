@@ -10,10 +10,11 @@
 #include "common.h"
 #include "config.h"
 #include "network.h"
+#include "logging.h"
+
 #include "shared.h"
 #include <pthread.h>
-
-#define SOCKET_TIMEOUT_SEC 3  // 3 second timeout for sockets
+#include <arpa/inet.h>
 
 /* Global variables */
 static GothamConfig gConfig;
@@ -45,7 +46,6 @@ static Worker** gpWorkers = NULL;
 static size_t gnWorkerCount = 0;
 static FleckClient** gpClients = NULL;
 static size_t gnClientCount = 0;
-static pthread_t* gpWorkerThreads = NULL;
 
 static pthread_mutex_t gWorkersMutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t gClientsMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -64,6 +64,8 @@ void vHandleFleckDisconnection(Connection* pConn);
 void vHandleWorkerCrash(Worker* pWorker);
 void vCompactWorkerArray();
 void vCheckMainWorkers();
+void vHandleDistortRequest(FleckClient* pClient, Frame* pFrame);
+void vHandleFrame(Connection* pConn, Frame* pFrame);
 
 /*************************************************
 * @Name: main
@@ -154,17 +156,7 @@ int main(int nArgc, char* psArgv[]) {
                     pConn->fd = nClientFd;
                     Frame* frame = receive_frame(pConn);
                     if (frame) {
-                        switch (frame->type) {
-                            case FRAME_WORKER_REG:
-                                vHandleWorkerRegistration(pConn, frame);
-                                break;
-                            case FRAME_CONNECT_REQ:
-                                vHandleFleckConnection(pConn, frame);
-                                break;
-                            default:
-                                close_connection(pConn);
-                                free(pConn);
-                        }
+                        vHandleFrame(pConn, frame);
                         free_frame(frame);
                     }
                 }
@@ -178,16 +170,7 @@ int main(int nArgc, char* psArgv[]) {
                 FD_ISSET(gpClients[i]->pConn->fd, &readfds)) {
                 Frame* frame = receive_frame(gpClients[i]->pConn);
                 if (frame) {
-                    switch (frame->type) {
-                        case FRAME_DISTORT_REQ:
-                            vHandleFleckRequest(gpClients[i], frame);
-                            break;
-                        case FRAME_DISCONNECT:
-                            vHandleFleckDisconnection(gpClients[i]->pConn);
-                            break;
-                        default:
-                            vWriteLog("Unknown frame type from client\n");
-                    }
+                    vHandleFrame(gpClients[i]->pConn, frame);
                     free_frame(frame);
                 } else {
                     // Connection lost
@@ -451,107 +434,72 @@ void vHandleShutdown(void) {
 }
 
 /*************************************************
-* @Name: vHandleFleckRequest
-* @Def: Handles distortion request from Fleck client
+* @Name: vHandleDistortRequest
+* @Def: Handles FRAME_DISTORT_REQ (0x10) frames
 * @Arg: In: pClient = Requesting client
-*       In: psType = Type of distortion requested
+*       In: pFrame = Received frame
 * @Ret: None
 *************************************************/
-void vHandleFleckRequest(FleckClient* pClient, Frame* pRequestFrame) {
+void vHandleDistortRequest(FleckClient* pClient, Frame* pFrame) {
     char sMediaType[16], sFileName[256];
-    char sMsg[256];
+    char sLogMsg[512];
 
-    vWriteLog("\n=== Processing Distortion Request ===\n");
-    vWriteLog("Received distortion request from client\n");
-
-    // Parse request
-    if (sscanf(pRequestFrame->data, "%[^&]&%s", sMediaType, sFileName) != 2) {
-        vWriteLog("Failed to parse request data\n");
-        Frame* error = create_frame(FRAME_ERROR, "Invalid request", 14);
+    // Parse request data
+    if(sscanf(pFrame->data, "%15[^&]&%255s", sMediaType, sFileName) != 2) {
+        vWriteLog("Invalid distort request format\n");
+        Frame* error = create_frame(FRAME_ERROR, "INVALID_FORMAT", 14);
         send_frame(pClient->pConn, error);
         free_frame(error);
         return;
     }
 
-    // Convert media type to proper case
-    if (strcasecmp(sMediaType, "media") == 0) {
-        strcpy(sMediaType, "Media");
-    } else if (strcasecmp(sMediaType, "text") == 0) {
-        strcpy(sMediaType, "Text");
-    } else {
-        vWriteLog("Invalid media type\n");
-        Frame* error = create_frame(FRAME_DISTORT_REQ, "MEDIA_KO", 8);
-        send_frame(pClient->pConn, error);
-        free_frame(error);
+    // Validate media type
+    if(strcasecmp(sMediaType, "media") != 0 && strcasecmp(sMediaType, "text") != 0) {
+        vWriteLog("Invalid media type received\n");
+        Frame* response = create_frame(FRAME_DISTORT_REQ, "MEDIA_KO", 8);
+        send_frame(pClient->pConn, response);
+        free_frame(response);
         return;
     }
 
-    snprintf(sMsg, sizeof(sMsg), "Request details - Media Type: %s, File: %s\n",
-             sMediaType, sFileName);
-    vWriteLog(sMsg);
-
-    // Find appropriate worker
-    Worker* pWorker = NULL;
+    // Worker selection logic
+    Worker* pSelectedWorker = NULL;
     pthread_mutex_lock(&gWorkersMutex);
-
-    vWriteLog("Looking for available worker...\n");
-    for (size_t i = 0; i < gnWorkerCount; i++) {
-        if (gpWorkers[i]) {
-            snprintf(sMsg, sizeof(sMsg), "Worker %zu - Type: %s, Main: %d, Busy: %d\n",
-                     i, gpWorkers[i]->psType, gpWorkers[i]->nIsMain, gpWorkers[i]->nIsBusy);
-            vWriteLog(sMsg);
-
-            if (!gpWorkers[i]->nIsBusy &&
-                gpWorkers[i]->nIsMain &&
-                strcasecmp(gpWorkers[i]->psType, sMediaType) == 0) {  // Use case-insensitive comparison
-                pWorker = gpWorkers[i];
-                pWorker->nIsBusy = 1;
-                vWriteLog("Found available worker!\n");
-                break;
-            }
+    for(size_t i = 0; i < gnWorkerCount; i++) {
+        if(gpWorkers[i] && !gpWorkers[i]->nIsBusy &&
+           strcasecmp(gpWorkers[i]->psType, sMediaType) == 0) {
+            pSelectedWorker = gpWorkers[i];
+            pSelectedWorker->nIsBusy = 1;
+            break;
         }
     }
     pthread_mutex_unlock(&gWorkersMutex);
 
-    if (!pWorker) {
-        vWriteLog("No available worker found\n");
-        Frame* error = create_frame(FRAME_DISTORT_REQ, "DISTORT_KO", 9);
-        send_frame(pClient->pConn, error);
-        free_frame(error);
-        return;
-    }
+    // Prepare response
+    if(pSelectedWorker) {
+        struct sockaddr_in* pAddr = &pSelectedWorker->pConn->addr;
+        char sIP[INET_ADDRSTRLEN];
+        char sPort[8];
 
-    // Get worker's address info
-    struct sockaddr_in* addr = &pWorker->pConn->addr;
-    char sIP[INET_ADDRSTRLEN];
-    char sPort[8];  // Add buffer for port string
+        inet_ntop(AF_INET, &pAddr->sin_addr, sIP, INET_ADDRSTRLEN);
+        snprintf(sPort, sizeof(sPort), "%d", ntohs(pAddr->sin_port));
 
-    inet_ntop(AF_INET, &(addr->sin_addr), sIP, INET_ADDRSTRLEN);
-    snprintf(sPort, sizeof(sPort), "%d", ntohs(addr->sin_port));  // Convert port to string
+        char sResponseData[256];
+        snprintf(sResponseData, sizeof(sResponseData), "%s&%s", sIP, sPort);
 
-    snprintf(sMsg, sizeof(sMsg), "Selected worker info - IP: %s, Port: %s\n",
-             sIP, sPort);
-    vWriteLog(sMsg);
+        Frame* response = create_frame(FRAME_DISTORT_REQ, sResponseData, strlen(sResponseData));
+        send_frame(pClient->pConn, response);
+        free_frame(response);
 
-    // Send worker info to client as strings
-    char sData[DATA_SIZE];
-    snprintf(sData, sizeof(sData), "%s&%s", sIP, sPort);  // Use string format
-
-    vWriteLog("Preparing response with worker info\n");
-
-    Frame* response = create_frame(FRAME_DISTORT_REQ, sData, strlen(sData));
-    if (send_frame(pClient->pConn, response) != 0) {
-        vWriteLog("Failed to send worker info to client\n");
-        pWorker->nIsBusy = 0;
+        snprintf(sLogMsg, sizeof(sLogMsg), "Assigned %s worker %s:%s for %s\n",
+                sMediaType, sIP, sPort, sFileName);
+        vWriteLog(sLogMsg);
     } else {
-        snprintf(sMsg, sizeof(sMsg), "Sent worker connection info to client: %s:%s\n",
-                sIP, sPort);
-        vWriteLog(sMsg);
+        Frame* response = create_frame(FRAME_DISTORT_REQ, "DISTORT_KO", 10);
+        send_frame(pClient->pConn, response);
+        free_frame(response);
+        vWriteLog("No available workers for request\n");
     }
-    free_frame(response);
-
-    pClient->pCurrentWorker = pWorker;
-    vWriteLog("=== Request Processing Complete ===\n\n");
 }
 
 /*************************************************
@@ -759,4 +707,82 @@ void vCheckMainWorkers() {
     }
 
     pthread_mutex_unlock(&gWorkersMutex);
+}
+
+/*************************************************
+* @Name: vHandleFrame
+* @Def: Handles incoming frames
+* @Arg: In: pConn = Connection from client
+*       In: pFrame = Received frame
+* @Ret: None
+*************************************************/
+void vHandleFrame(Connection* pConn, Frame* pFrame) {
+    char sLogMsg[512];
+    snprintf(sLogMsg, sizeof(sLogMsg),
+             "Processing frame - Type: 0x%02X, Length: %d, Checksum: 0x%04X\n",
+             pFrame->type, pFrame->data_length, pFrame->checksum);
+    vWriteLog(sLogMsg);
+
+    uint16_t nCalculatedChecksum = calculate_checksum(pFrame);
+    if (nCalculatedChecksum != pFrame->checksum) {
+        snprintf(sLogMsg, sizeof(sLogMsg),
+                "Checksum mismatch - Expected: 0x%04X, Got: 0x%04X\n",
+                pFrame->checksum, nCalculatedChecksum);
+        vWriteLog(sLogMsg);
+        return;
+    }
+
+    switch (pFrame->type) {
+        case FRAME_WORKER_REG:
+            vHandleWorkerRegistration(pConn, pFrame);
+            break;
+
+        case FRAME_CONNECT_REQ:
+            vHandleFleckConnection(pConn, pFrame);
+            break;
+
+        case FRAME_DISTORT_REQ:
+            vWriteLog("Received distortion request\n");
+            FleckClient* pClient = NULL;
+            pthread_mutex_lock(&gClientsMutex);
+            for (size_t i = 0; i < gnClientCount; i++) {
+                if (gpClients[i] && gpClients[i]->pConn == pConn) {
+                    pClient = gpClients[i];
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&gClientsMutex);
+
+            if (pClient) {
+                vHandleDistortRequest(pClient, pFrame);
+            } else {
+                vWriteLog("Error: Distortion request from unregistered client\n");
+            }
+            break;
+
+        case FRAME_HEARTBEAT:
+            pthread_mutex_lock(&gWorkersMutex);
+            for (size_t i = 0; i < gnWorkerCount; i++) {
+                if (gpWorkers[i] && gpWorkers[i]->pConn == pConn) {
+                    Frame* response = create_frame(FRAME_HEARTBEAT, NULL, 0);
+                    send_frame(pConn, response);
+                    free_frame(response);
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&gWorkersMutex);
+            break;
+
+        case FRAME_DISCONNECT:
+            vHandleFleckDisconnection(pConn);
+            break;
+
+        default:
+            snprintf(sLogMsg, sizeof(sLogMsg),
+                    "Unhandled frame type: 0x%02X\n", pFrame->type);
+            vWriteLog(sLogMsg);
+            close_connection(pConn);
+            free(pConn);
+            break;
+    }
 }

@@ -15,6 +15,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/time.h>
+#include <sys/select.h>
 
 #define ERROR_MSG_COMMAND "ERROR: Please input a valid command.\n"
 #define ERROR_MSG_NOT_CONNECTED "Cannot distort, you are not connected to Mr. J System\n"
@@ -24,6 +26,9 @@ static FleckConfig gConfig;
 static int gnIsConnected = 0;
 static Connection *gpGothamConn = NULL;
 static Connection *gpWorkerConn = NULL;
+static char *psCurrentMediaType = NULL;
+static char *psCurrentFile = NULL;
+static char *psCurrentFactor = NULL;
 
 /* Function declarations */
 void vHandleConnect(void);
@@ -283,6 +288,14 @@ void vHandleLogout(void) {
     }
     printF("Thanks for using Mr. J System, see you soon, chaos lover :)\n");
     exit(0);
+
+    // Free distortion parameters
+    free(psCurrentMediaType);
+    free(psCurrentFile);
+    free(psCurrentFactor);
+    psCurrentMediaType = NULL;
+    psCurrentFile = NULL;
+    psCurrentFactor = NULL;
 }
 
 /*************************************************
@@ -434,6 +447,14 @@ void vHandleDistort(const char *psFile, const char *psFactor) {
     snprintf(sMsg, sizeof(sMsg), "Received worker info - IP: %s, Port: %s\n",
              sWorkerIP, sWorkerPort);
     vWriteLog(sMsg);
+
+    // Store current distortion parameters for crash recovery
+    free(psCurrentMediaType);  // Free previous values if any
+    free(psCurrentFile);
+    free(psCurrentFactor);
+    psCurrentMediaType = strdup(psMediaType);
+    psCurrentFile = strdup(psFile);
+    psCurrentFactor = strdup(psFactor);
 
     // Connect to worker and handle distortion
     vConnectToWorker(sWorkerIP, sWorkerPort, psFile, psFactor);

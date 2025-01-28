@@ -1,10 +1,35 @@
-#include "network.h"
+#include "../include/network.h"
+#include "../include/logging.h"
 #include <sys/time.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+#include <poll.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stddef.h>
+#include <arpa/inet.h>
 
 #define DEBUG 1
-#define SOCKET_TIMEOUT_SEC 3
+
+static char last_error[256] = {0};
+static pthread_t heartbeat_thread;
+static volatile bool heartbeat_running = false;
+
+static void set_last_error(const char* msg) {
+    strncpy(last_error, msg, sizeof(last_error) - 1);
+    log_error("NETWORK", last_error);
+}
+
+const char* get_last_error(void) {
+    return last_error;
+}
+
+void clear_last_error(void) {
+    last_error[0] = '\0';
+}
 
 /*************************************************
 * @Name: vLogNetwork
@@ -68,8 +93,8 @@ Connection* create_server(const char *psIP, int nPort) {
     }
 
     // Set socket options
-    int nOpt = 1;
-    if (setsockopt(pConn->fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &nOpt, sizeof(nOpt))) {
+    int opt = 1;
+    if (setsockopt(pConn->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         vLogNetwork("CREATE_SERVER", "Setsockopt failed", -1);
         close(pConn->fd);
         free(pConn);
@@ -188,7 +213,7 @@ ssize_t receive_data(Connection *pConn, void *pvBuffer, size_t nLen) {
     ssize_t nTotal = 0;
     char *psBuffer = (char*)pvBuffer;
 
-    while (nTotal < nLen) {
+    while ((size_t)nTotal < nLen) {
         ssize_t nBytes = read(pConn->fd, psBuffer + nTotal, 1);
         if (nBytes <= 0) {
             if (nTotal == 0) return nBytes;
@@ -311,28 +336,29 @@ Frame* create_frame(uint8_t type, const char* data, uint16_t data_length) {
 * @Arg: In: frame = frame to calculate checksum for
 * @Ret: Calculated checksum
 *************************************************/
-uint16_t calculate_checksum(Frame* frame) {
+uint16_t calculate_checksum(const Frame* frame) {
+    if (!frame) return 0;
+
     uint32_t sum = 0;
 
-    // Add type (1 byte)
+    // Add type
     sum += frame->type;
 
-    // Add data length (2 bytes)
+    // Add data length
     sum += (frame->data_length & 0xFF);
     sum += ((frame->data_length >> 8) & 0xFF);
 
-    // Add data bytes
-    for (int i = 0; i < frame->data_length; i++) {
+    // Add data
+    for (size_t i = 0; i < frame->data_length; i++) {
         sum += (uint8_t)frame->data[i];
     }
 
-    // Add timestamp (4 bytes)
-    sum += (frame->timestamp & 0xFF);
-    sum += ((frame->timestamp >> 8) & 0xFF);
-    sum += ((frame->timestamp >> 16) & 0xFF);
-    sum += ((frame->timestamp >> 24) & 0xFF);
+    // Add timestamp
+    const uint8_t* ts = (const uint8_t*)&frame->timestamp;
+    for (size_t i = 0; i < sizeof(uint32_t); i++) {
+        sum += ts[i];
+    }
 
-    // Calculate final checksum (mod 2^16)
     return (uint16_t)(sum % 65536);
 }
 
@@ -343,21 +369,23 @@ uint16_t calculate_checksum(Frame* frame) {
 *       In: frame = frame to send
 * @Ret: 0 on success, -1 on failure
 *************************************************/
-int send_frame(Connection* conn, Frame* frame) {
-    if (!conn || !frame) return -1;
+bool send_frame(Connection* conn, const Frame* frame) {
+    if (!conn || !frame) {
+        set_last_error("Invalid parameters");
+        return false;
+    }
 
-    frame->timestamp = time(NULL);
-    frame->checksum = calculate_checksum(frame);
+    Frame temp = *frame;
+    temp.timestamp = time(NULL);
+    temp.checksum = calculate_checksum(&temp);
 
-    ssize_t bytes = write(conn->fd, frame, FRAME_SIZE);
+    ssize_t sent = write(conn->fd, &temp, sizeof(Frame));
+    if (sent != sizeof(Frame)) {
+        set_last_error("Failed to send complete frame");
+        return false;
+    }
 
-    char debug[512];
-    snprintf(debug, sizeof(debug),
-             "Sending frame - Type: 0x%02X, Length: %d, Checksum: 0x%04X",
-             frame->type, frame->data_length, frame->checksum);
-    vLogNetwork("SEND", debug, bytes);
-
-    return (bytes == FRAME_SIZE) ? 0 : -1;
+    return true;
 }
 
 /*************************************************
@@ -367,36 +395,26 @@ int send_frame(Connection* conn, Frame* frame) {
 * @Ret: Received frame or NULL on failure
 *************************************************/
 Frame* receive_frame(Connection* conn) {
-    if (!conn) return NULL;
+    if (!conn) {
+        set_last_error("Invalid connection");
+        return NULL;
+    }
 
     Frame* frame = malloc(sizeof(Frame));
-    if (!frame) return NULL;
+    if (!frame) {
+        set_last_error("Memory allocation failed");
+        return NULL;
+    }
 
-    ssize_t bytes = read(conn->fd, frame, FRAME_SIZE);
-    if (bytes != FRAME_SIZE) {
-        vLogNetwork("RECV", "Failed to read complete frame", bytes);
+    if (receive_data(conn, frame, sizeof(Frame)) != sizeof(Frame)) {
+        set_last_error("Failed to receive complete frame");
         free(frame);
         return NULL;
     }
 
-    char debug[512];
-    snprintf(debug, sizeof(debug),
-             "Received frame: Type=0x%02X, Length=%d, Checksum=0x%04X",
-             frame->type, frame->data_length, frame->checksum);
-    vLogNetwork("RECV_FRAME", debug, bytes);
-
-    // Validate checksum
-    uint16_t received_checksum = frame->checksum;
-    frame->checksum = 0;
-    uint16_t calculated_checksum = calculate_checksum(frame);
-    frame->checksum = received_checksum;
-
-    if (received_checksum != calculated_checksum) {
-        vLogNetwork("VALIDATE", "Checksum mismatch", -1);
-        Frame* error = create_frame(FRAME_ERROR, NULL, 0);
-        send_frame(conn, error);
-        free_frame(error);
-        free_frame(frame);
+    if (!validate_frame(frame)) {
+        set_last_error("Frame validation failed");
+        free(frame);
         return NULL;
     }
 
@@ -409,46 +427,15 @@ Frame* receive_frame(Connection* conn) {
 * @Arg: In: frame = frame to validate
 * @Ret: 1 if valid, 0 if invalid
 *************************************************/
-int validate_frame(Frame* frame) {
-    if (!frame) return 0;
+bool validate_frame(const Frame* frame) {
+    if (!frame) return false;
 
-    // Log frame details
-    char debug[256];
-    snprintf(debug, sizeof(debug),
-             "Validating frame - Type: 0x%02X, Length: %d, Data: %.*s",
-             frame->type, frame->data_length,
-             frame->data_length, frame->data);
-    vLogNetwork("VALIDATE", debug, 0);
+    uint16_t received = frame->checksum;
+    ((Frame*)frame)->checksum = 0;  // Temporarily clear for calculation
+    uint16_t calculated = calculate_checksum(frame);
+    ((Frame*)frame)->checksum = received;  // Restore
 
-    // Save received checksum
-    uint16_t received_checksum = frame->checksum;
-
-    // Calculate checksum
-    frame->checksum = 0;  // Zero out for calculation
-    uint16_t calculated_checksum = calculate_checksum(frame);
-
-    // Restore original checksum
-    frame->checksum = received_checksum;
-
-    // Log detailed checksum comparison
-    snprintf(debug, sizeof(debug),
-             "Checksum comparison - Received: 0x%04X, Calculated: 0x%04X, Match: %s",
-             received_checksum, calculated_checksum,
-             (received_checksum == calculated_checksum) ? "Yes" : "No");
-    vLogNetwork("VALIDATE_CHECKSUM", debug, received_checksum == calculated_checksum);
-
-    // If checksums don't match, log frame contents for debugging
-    if (received_checksum != calculated_checksum) {
-        snprintf(debug, sizeof(debug),
-                "Frame contents - Type: 0x%02X, Length: %d, Data: '%.*s', "
-                "Timestamp: %u",
-                frame->type, frame->data_length,
-                frame->data_length, frame->data,
-                frame->timestamp);
-        vLogNetwork("FRAME_DETAIL", debug, 0);
-    }
-
-    return received_checksum == calculated_checksum;
+    return received == calculated;
 }
 
 /*************************************************
@@ -459,23 +446,6 @@ int validate_frame(Frame* frame) {
 *************************************************/
 void free_frame(Frame* frame) {
     free(frame);
-}
-
-/*************************************************
-* @Name: log_frame
-* @Def: Logs frame details for debugging
-* @Arg: In: prefix = log prefix
-*       In: frame = frame to log
-* @Ret: None
-*************************************************/
-void log_frame(const char* prefix, Frame* frame) {
-    if (DEBUG) {
-        char* msg;
-        asprintf(&msg, "FRAME %s - Type: 0x%02X, Length: %d, Checksum: 0x%04X\n",
-                prefix, frame->type, frame->data_length, frame->checksum);
-        write(STDOUT_FILENO, msg, strlen(msg));
-        free(msg);
-    }
 }
 
 void vHandleErrorFrame(Connection* pConn, const char* psError) {
@@ -509,31 +479,22 @@ int vValidateFrame(Frame* pFrame, Connection* pConn) {
 * @Arg: In: conn = Connection to check
 * @Ret: 1 if connected, 0 if not
 *************************************************/
-int is_connected(Connection* conn) {
+bool is_connected(Connection* conn) {
     if (!conn || conn->fd < 0) {
-        return 0;
+        return false;
     }
 
-    // Use poll() to check connection status
-    struct pollfd pfd;
-    pfd.fd = conn->fd;
-    pfd.events = POLLIN | POLLHUP;
-    pfd.revents = 0;
+    struct pollfd pfd = {
+        .fd = conn->fd,
+        .events = POLLIN | POLLHUP,
+        .revents = 0
+    };
 
-    int result = poll(&pfd, 1, 0);  // Non-blocking poll
-
-    if (result < 0) {
-        // Error occurred
-        return 0;
+    if (poll(&pfd, 1, 0) < 0) {
+        return false;
     }
 
-    // Check if connection was closed
-    if (pfd.revents & POLLHUP) {
-        return 0;
-    }
-
-    // Connection is still alive
-    return 1;
+    return !(pfd.revents & (POLLHUP | POLLERR));
 }
 
 void* vHeartbeatThread(void* pvArg) {
@@ -542,7 +503,7 @@ void* vHeartbeatThread(void* pvArg) {
     while (1) {
         // Send heartbeat frame (type 0x12)
         Frame* heartbeat = create_frame(FRAME_HEARTBEAT, NULL, 0);
-        if (send_frame(pConn, heartbeat) != 0) {
+        if (!send_frame(pConn, heartbeat)) {
             free_frame(heartbeat);
             break;
         }
@@ -570,33 +531,83 @@ void* vHeartbeatThread(void* pvArg) {
 * @Ret: Received frame or NULL on timeout/failure
 *************************************************/
 Frame* receive_frame_timeout(Connection* conn, int timeout_sec) {
+    if (!conn) {
+        set_last_error("Invalid connection");
+        return NULL;
+    }
+
+    Frame* frame = malloc(sizeof(Frame));
+    if (!frame) {
+        set_last_error("Memory allocation failed");
+        return NULL;
+    }
+
+    if (receive_data_timeout(conn, frame, sizeof(Frame), timeout_sec) != sizeof(Frame)) {
+        set_last_error("Failed to receive frame within timeout");
+        free(frame);
+        return NULL;
+    }
+
+    if (!validate_frame(frame)) {
+        set_last_error("Frame validation failed");
+        free(frame);
+        return NULL;
+    }
+
+    return frame;
+}
+
+int send_frame_conn(Connection* conn, const Frame* frame) {
+    if (!conn || !frame) return -1;
+    return send_data(conn, frame, sizeof(Frame)) == sizeof(Frame) ? 0 : -1;
+}
+
+Frame* receive_frame_conn(Connection* conn) {
     if (!conn) return NULL;
 
-    // Set up select() for timeout
-    fd_set readfds;
-    struct timeval tv;
+    Frame* frame = malloc(sizeof(Frame));
+    if (!frame) return NULL;
 
-    FD_ZERO(&readfds);
-    FD_SET(conn->fd, &readfds);
-
-    tv.tv_sec = timeout_sec;
-    tv.tv_usec = 0;
-
-    // Wait for data with timeout
-    int ready = select(conn->fd + 1, &readfds, NULL, NULL, &tv);
-
-    if (ready < 0) {
-        // Error occurred
-        vLogNetwork("TIMEOUT", "Select error", -1);
+    if (receive_data(conn, frame, sizeof(Frame)) != sizeof(Frame) || !validate_frame(frame)) {
+        free(frame);
         return NULL;
     }
 
-    if (ready == 0) {
-        // Timeout occurred
-        vLogNetwork("TIMEOUT", "No data received within timeout", 0);
+    return frame;
+}
+
+Frame* receive_frame_timeout_conn(Connection* conn, int timeout_sec) {
+    if (!conn) return NULL;
+
+    Frame* frame = malloc(sizeof(Frame));
+    if (!frame) return NULL;
+
+    if (receive_data_timeout(conn, frame, sizeof(Frame), timeout_sec) != sizeof(Frame) || !validate_frame(frame)) {
+        free(frame);
         return NULL;
     }
 
-    // Data is available, receive frame
-    return receive_frame(conn);
+    return frame;
+}
+
+bool start_heartbeat_monitor(Connection* conn) {
+    if (heartbeat_running) {
+        return false;
+    }
+
+    heartbeat_running = true;
+    if (pthread_create(&heartbeat_thread, NULL, vHeartbeatThread, conn) != 0) {
+        heartbeat_running = false;
+        set_last_error("Failed to create heartbeat thread");
+        return false;
+    }
+
+    return true;
+}
+
+void stop_heartbeat_monitor(void) {
+    if (heartbeat_running) {
+        heartbeat_running = false;
+        pthread_join(heartbeat_thread, NULL);
+    }
 }
